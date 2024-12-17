@@ -6,6 +6,6 @@
 
 2. Then, you can run the "store.c" file.
 
-3. After a few seconds, when the file processing is complete, you should place the rating for each user in the "rates" directory. The format and file naming for this can also be found in that directory, where you need to save the rating in a text file.
+3. After a few seconds, when the file processing is complete, program waits until get the rate of products that user bought, then you should place the rating for each user in the "rates" directory. The format and file naming for this can also be found in that directory, where you need to save the rating in a text file.
 
 4. Finally, when the rating files have been reviewed, the program will terminate.
