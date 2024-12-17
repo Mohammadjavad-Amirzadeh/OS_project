@@ -106,6 +106,7 @@ void update_product_paths(const char *user_dir, struct Product *shopping_list, i
             fgets(line, sizeof(line), store);
             sscanf(line, "Path: %s", product.file_path);
 
+            // به‌روزرسانی مسیر فایل برای محصولات در shopping_list
             for (int i = 0; i < shopping_list_count; i++) {
                 struct Product *item = &shopping_list[i];
                 if (strcmp(product.name, item->name) == 0) {
@@ -167,7 +168,7 @@ void calculate_store_scores(const char *user_dir, struct Product *shopping_list,
                     struct Product *item = &shopping_list[i];
                     if (strcmp(product.name, item->name) == 0) {
                         if (product.entity < item->entity) {
-                            
+                            // موجودی کافی نیست
                             store_scores[store_idx].valid = 0;
                             break;
                         }
@@ -178,29 +179,30 @@ void calculate_store_scores(const char *user_dir, struct Product *shopping_list,
                         }else{
                             printf("LIST didnt get 10 percent discount. \nStore : %d\n" , store_idx + 1);
                         }
-                       
+                        // محاسبه امتیاز نسبی و قیمت کل
                         store_scores[store_idx].total_score += (product.score /( product.price * discount)) * item->entity;
                         store_scores[store_idx].total_price += (product.price * discount) * item->entity;
 
-                       
+                        // بررسی Threshold
                         if (store_scores[store_idx].total_price > threshold) {
                             store_scores[store_idx].valid = 0;
                         }
                     }
                 }
             }
-            if (!store_scores[store_idx].valid) break; 
+            if (!store_scores[store_idx].valid) break; // اگر فروشگاه نامعتبر شد، بقیه محصولات بررسی نمی‌شوند
         }
         //printf("STORE SCORE [%d] . VALID : %d\n", store_idx, store_scores[store_idx].valid);
         fclose(store);
     }
 }
 
-
+// کاهش موجودی محصولات در فایل‌های فروشگاه انتخاب‌شده
 void update_store_inventory(const char *user_dir, struct Product *shopping_list, int shopping_list_count, int best_store) {
     for (int i = 0; i < shopping_list_count; i++) {
         struct Product *item = &shopping_list[i];
 
+        // باز کردن فایل محصول مرتبط
         FILE *product_file = fopen(item->file_path, "r+");
         if (!product_file) {
             printf("this is the given path: %s\n", item->file_path);
@@ -210,12 +212,12 @@ void update_store_inventory(const char *user_dir, struct Product *shopping_list,
 
         struct Product product;
 
-       
+        // خواندن اطلاعات محصول از فایل
         fscanf(product_file,
                "Name: %99[^\n]\nPrice: %f\nScore: %f\nEntity: %d\nLast Modified: %49[^\n]\: %s\n",
                product.name, &product.price, &product.score, &product.entity, product.last_modified);
 
- 
+        // کاهش موجودی
         if (product.entity >= item->entity) {
             product.entity -= item->entity;
         } else {
@@ -224,11 +226,11 @@ void update_store_inventory(const char *user_dir, struct Product *shopping_list,
             continue;
         }
 
-        
+        // به‌روزرسانی زمان آخرین تغییر
         time_t now = time(NULL);
         strftime(product.last_modified, sizeof(product.last_modified), "%Y-%m-%d %H:%M:%S", localtime(&now));
 
-        
+        // بازنویسی اطلاعات محصول در فایل
         fseek(product_file, 0, SEEK_SET);
         fprintf(product_file,
                 "Name: %s\nPrice: %.2f\nScore: %.2f\nEntity: %d\nLast Modified: %s\n",
@@ -245,7 +247,7 @@ void update_store_score(const char *user_dir, struct Product *shopping_list, int
     for (int i = 0; i < shopping_list_count; i++) {
         struct Product *item = &shopping_list[i];
 
-        
+        // باز کردن فایل محصول مرتبط
         FILE *product_file = fopen(item->file_path, "r+");
         if (!product_file) {
             printf("this is the given path: %s\n", item->file_path);
@@ -255,6 +257,7 @@ void update_store_score(const char *user_dir, struct Product *shopping_list, int
 
         struct Product product;
 
+        // خواندن اطلاعات محصول از فایل
         fscanf(product_file,
                "Name: %99[^\n]\nPrice: %f\nScore: %f\nEntity: %d\nLast Modified: %49[^\n]\: %s\n",
                product.name, &product.price, &product.score, &product.entity, product.last_modified);
@@ -262,11 +265,11 @@ void update_store_score(const char *user_dir, struct Product *shopping_list, int
 
         product.score = (product.score + votes[i]) / 2.0 ; 
 
-        
+        // به‌روزرسانی زمان آخرین تغییر
         time_t now = time(NULL);
         strftime(product.last_modified, sizeof(product.last_modified), "%Y-%m-%d %H:%M:%S", localtime(&now));
 
-     
+        // بازنویسی اطلاعات محصول در فایل
         fseek(product_file, 0, SEEK_SET);
         fprintf(product_file,
                 "Name: %s\nPrice: %.2f\nScore: %.2f\nEntity: %d\nLast Modified: %s\n",
@@ -280,7 +283,7 @@ void update_store_score(const char *user_dir, struct Product *shopping_list, int
 
 
 int finalize_purchase(struct StoreScore *store_scores) {
-  
+    // پیدا کردن فروشگاه با بیشترین امتیاز کل
     int best_store_idx = -1;
     float best_score = -1;
 
@@ -302,15 +305,16 @@ int finalize_purchase(struct StoreScore *store_scores) {
     printf("Purchase completed at store: %s\n", best_store->store_name);
     printf("Total Price: %.2f\n", best_store->total_price);
     printf("Total Score: %.2f\n", best_store->total_score);
-    store_purchases[best_store_idx]++; 
+    store_purchases[best_store_idx]++; // افزایش تعداد خرید از فروشگاه انتخاب‌شده
     return best_store_idx;
+    // کاهش موجودی محصولات در فایل‌های فروشگاه انتخاب‌شده
 }
 
 int read_integers_from_file_with_array(const char *filename, int *arr, int size) {
     FILE *fp = fopen(filename, "r");
     if (!fp) {
         perror("fopen");
-        return -1; 
+        return -1; // اگر فایل باز نشد، -1 برمی‌گردانیم
     }
 
     int num;
@@ -321,24 +325,30 @@ int read_integers_from_file_with_array(const char *filename, int *arr, int size)
 
     fclose(fp);
 
-    return idx; 
+    return idx; // تعداد اعداد خوانده شده
 }
 
 void *give_value_to_list(void *arg) {
     struct ValuePuttingArgs *args = (struct ValuePuttingArgs *)arg;
 
+    // منتظر بمانید تا لیست فعلی برای پردازش آماده شود
     while (args->user_list_number-1 > user_processed_list[args->user_number]) {
         sleep(0.2);
     }
 
     sem_wait(global_semaphore);
+    //printf("\n\nuser_number : %d, user_list_number: %d\n", args->user_number, args -> user_list_number);
 
+    // مسیر دایرکتوری لیست‌های کاربر
     char user_dir[MAX_PATH_LENGTH];
     snprintf(user_dir, sizeof(user_dir), "output/user%d_list%d_output", args->user_number, args->user_list_number);
+    //printf("user_dir (give_value): %s\n", user_dir);
 
+    // محاسبه امتیازات فروشگاه‌ها
     struct StoreScore store_scores[3];
     calculate_store_scores(user_dir, args->shopping_list, args->shopping_list_count, args->threshold, store_scores);
     
+    // انتخاب فروشگاه و انجام خرید
     printf("Finalizing purchase for user%d list%d\n",args->user_number , args->user_list_number);
     int selected = finalize_purchase(store_scores);
     if (selected != -1)
@@ -346,17 +356,20 @@ void *give_value_to_list(void *arg) {
         char store_file[MAX_PATH_LENGTH];
         snprintf(store_file, sizeof(store_file), "%s/store%d.txt", user_dir, selected + 1);
 
-   
+        // به‌روزرسانی مسیر فایل‌ها
         update_product_paths(user_dir, args->shopping_list, args->shopping_list_count, store_file);
 
+        // کاهش موجودی محصولات
         update_store_inventory(user_dir, args->shopping_list, args->shopping_list_count, selected);
     }
     
+    // افزایش شمارنده لیست پردازش‌شده برای این کاربر
     user_processed_list[args->user_number]++;
 
     sem_post(global_semaphore);
 
 
+    //const char *filename = "./rates/user1.txt"; // مسیر فایل مورد نظر
 
     if (selected != -1)
     {
@@ -375,7 +388,10 @@ void *give_value_to_list(void *arg) {
     }
 
     int count = read_integers_from_file_with_array(user_vote_file, votes, array_size);
-
+    // printf("Count: %d\n", count);
+    // for (int i = 0; i < count; i++) {
+    //     printf("%d\n", votes[i]);
+    // }
 
     sem_wait(global_semaphore);
     
@@ -406,7 +422,7 @@ void read_user_shopping_list(const char *file_path, struct ShoppingList *shoppin
         if (strstr(line, "list")) {
             current_list++;
             shopping_lists[current_list].product_count = 0;
-            shopping_lists[current_list].threshold = INT_MAX;
+            shopping_lists[current_list].threshold = INT_MAX; // Default threshold
         } else if (strstr(line, "Treshhold")) {
             sscanf(line, "Treshhold : %d", &shopping_lists[current_list].threshold);
         } else {
@@ -502,6 +518,14 @@ void *process_file(void *arg) {
 }
 
 void process_directory(const char *dir_path, const char *user_dir, struct Product *shopping_list, int shopping_list_count, int User_pid, int threshold, int user_number, int user_list_number) {
+    int pipefd[2];
+    char buf;
+
+    if (pipe(pipefd) == -1) {
+        perror("pipe");
+        exit(EXIT_FAILURE);
+    }
+    
     DIR *dir = opendir(dir_path);
     if (!dir) {
         perror("Failed to open directory");
@@ -527,10 +551,24 @@ void process_directory(const char *dir_path, const char *user_dir, struct Produc
             if (S_ISDIR(statbuf.st_mode)) {
                 pid_t pid = fork();
                 if (pid == 0) {
+
+                    close(pipefd[1]); 
+
+                    int ppid;
+                    read(pipefd[0], &ppid, sizeof(ppid)); 
+
+                    close(pipefd[0]);
+
                     printf("PID : %d Created Child process (PID : %d) for Path: %s \n", getppid(), getpid(), full_path);
                     process_directory(full_path, user_dir, shopping_list, shopping_list_count, User_pid, threshold, user_number, user_list_number);
                     exit(0);
                 } else {
+
+                    close(pipefd[0]); 
+                    int ppid = getpid();
+                    write(pipefd[1], &ppid, sizeof(ppid)); 
+                    close(pipefd[1]);
+
                     child_pids[child_count++] = pid;
                 }
             } else if (S_ISREG(statbuf.st_mode) && strstr(entry->d_name, ".txt")) {
@@ -545,6 +583,7 @@ void process_directory(const char *dir_path, const char *user_dir, struct Produc
                 if (pthread_create(&threads[thread_count], NULL, process_file, args) != 0) {
                     perror("Failed to create thread");
                 } else {
+                    //printf("PID : %d Create Thread with Thread TID %ld created for file %s\n", getpid(), threads[thread_count], full_path);
                     thread_count++;
                 }
             }
@@ -554,7 +593,7 @@ void process_directory(const char *dir_path, const char *user_dir, struct Produc
         printf("this is parent of %d\n", User_pid);
         sleep(2);
         printf("this is parent of %d after sleep\n", User_pid);
-
+        // struct Valueargs *args = malloc(sizeof(struct Valueargs));
         pthread_t value_thread;
         struct ValuePuttingArgs *args = malloc(sizeof(struct ValuePuttingArgs));
         args->threshold = threshold;
@@ -582,13 +621,13 @@ int main() {
     printf("Enter the number of users: ");
     scanf("%d", &user_count);
 
-  
+    // ایجاد پوشه خروجی اصلی
     if (mkdir("output", 0777) == -1 && errno != EEXIST) {
         perror("Failed to create output directory");
         exit(EXIT_FAILURE);
     }
 
-    initialize_shared_semaphore(); 
+    initialize_shared_semaphore(); // مقداردهی سمافور
     for (int i = 1; i <= user_count; i++) {
         pid_t pid = fork();
         if (pid == 0) {
@@ -607,7 +646,7 @@ int main() {
                 for (int k = 0; k < 3; k ++){
                     char store_file[MAX_PATH_LENGTH];
                     snprintf(store_file, sizeof(store_file), "%s/store%d.txt", user_dir, k + 1);
-               
+                    // printf("store FILE : %s\n", store_file);
                     fclose(fopen(store_file, "w"));
                 }
 
@@ -623,6 +662,6 @@ int main() {
     }
 
     pthread_mutex_destroy(&file_mutex);
-    destroy_shared_semaphore(); 
+    destroy_shared_semaphore(); // حذف سمافور
     return 0;
 }
