@@ -19,6 +19,9 @@
 #define MAX_THREADS 10000
 
 pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
+int user_processed_list[MAX_USERS] = {0};
+sem_t *global_semaphore; 
+int store_purchases[3] = {0}; 
 
 struct Product {
     char name[100];
@@ -28,6 +31,364 @@ struct Product {
     char last_modified[50];
     char file_path[MAX_PATH_LENGTH];
 };
+
+struct ShoppingList {
+    struct Product products[MAX_PRODUCTS];
+    int product_count;
+    int threshold;
+};
+
+struct ThreadArgs {
+    char file_path[MAX_PATH_LENGTH];
+    struct Product *shopping_list;
+    int shopping_list_count;
+    char user_dir[MAX_PATH_LENGTH];
+};
+
+struct StoreScore {
+    char store_name[50];
+    float total_score;
+    float total_price;
+    int valid; 
+};
+
+
+struct ValuePuttingArgs {
+    int threshold;
+    int user_number;
+    int user_list_number;
+    struct Product *shopping_list;
+    int shopping_list_count;
+};
+void read_user_shopping_list(const char *file_path, struct ShoppingList *shopping_lists, int *list_count);
+void read_product_file(const char *file_path, struct Product *product);
+void *process_file(void *arg);
+void process_directory(const char *dir_path, const char *user_dir, struct Product *shopping_list, int shopping_list_count, int User_pid, int threshold, int user_number, int user_list_number);
+
+void initialize_shared_semaphore() {
+    global_semaphore = sem_open("/shared_semaphore", O_CREAT, 0666, 1);
+    if (global_semaphore == SEM_FAILED) {
+        perror("Failed to create or open semaphore");
+        exit(EXIT_FAILURE);
+    }
+}
+
+void destroy_shared_semaphore() {
+    if (sem_close(global_semaphore) == -1) {
+        perror("Failed to close semaphore");
+    }
+    if (sem_unlink("/shared_semaphore") == -1) {
+        perror("Failed to unlink semaphore");
+    }
+}
+
+void update_product_paths(const char *user_dir, struct Product *shopping_list, int shopping_list_count, const char *store_file) {
+    FILE *store = fopen(store_file, "r");
+    if (!store) {
+        perror("Failed to open store file for updating product paths");
+        return;
+    }
+
+    char line[256];
+    while (fgets(line, sizeof(line), store)) {
+        struct Product product;
+        if (sscanf(line, "Name: %99[^\n]", product.name) == 1) {
+            fgets(line, sizeof(line), store);
+            sscanf(line, "Price: %f", &product.price);
+
+            fgets(line, sizeof(line), store);
+            sscanf(line, "Score: %f", &product.score);
+
+            fgets(line, sizeof(line), store);
+            sscanf(line, "Entity: %d", &product.entity);
+
+            fgets(line, sizeof(line), store);
+            fgets(line, sizeof(line), store);
+            sscanf(line, "Path: %s", product.file_path);
+
+            for (int i = 0; i < shopping_list_count; i++) {
+                struct Product *item = &shopping_list[i];
+                if (strcmp(product.name, item->name) == 0) {
+                    strncpy(item->file_path, product.file_path, MAX_PATH_LENGTH - 1);
+                    item->file_path[MAX_PATH_LENGTH - 1] = '\0';
+                }
+            }
+        }
+    }
+
+    fclose(store);
+}
+
+void calculate_store_scores(const char *user_dir, struct Product *shopping_list, int shopping_list_count, int threshold, struct StoreScore *store_scores) {
+    char stores[3][50] = {"store1.txt", "store2.txt", "store3.txt"};
+
+    for (int store_idx = 0; store_idx < 3; store_idx++) {
+        char store_file[MAX_PATH_LENGTH];
+        snprintf(store_file, sizeof(store_file), "%s/%s", user_dir, stores[store_idx]);
+        //printf("STORE FILE : %s\n", store_file);
+
+        FILE *store = fopen(store_file, "r");
+        if (!store) {
+            // printf("%s\n",store_file);
+            perror("Failed to open store file");
+            store_scores[store_idx].valid = 0;
+            continue;
+        }
+
+        store_scores[store_idx].total_score = 0;
+        store_scores[store_idx].total_price = 0;
+        store_scores[store_idx].valid = 1; 
+        strcpy(store_scores[store_idx].store_name, stores[store_idx]);
+
+        char line[256];
+        while (fgets(line, sizeof(line), store)) {
+            struct Product product;
+            if (sscanf(line, "Name: %99[^\n]", product.name) == 1) {
+                fgets(line, sizeof(line), store);
+                sscanf(line, "Price: %f", &product.price);
+
+                fgets(line, sizeof(line), store);
+                sscanf(line, "Score: %f", &product.score);
+                fgets(line, sizeof(line), store);
+                sscanf(line, "Entity: %d", &product.entity);
+
+                fgets(line, sizeof(line), store); 
+                fgets(line, sizeof(line), store);
+                sscanf(line, "Path: %60[^\n]", product.file_path);
+                //printf("aaaaaaaaaa %s\n" , product.file_path);
+
+
+               read_product_file(product.file_path, &product);
+               //printf("p1 name : %s , p1 entity : %d , p1 filepath : %s \n",product.name, product.entity, product.file_path);
+               
+
+
+                for (int i = 0; i < shopping_list_count; i++) {
+                    struct Product *item = &shopping_list[i];
+                    if (strcmp(product.name, item->name) == 0) {
+                        if (product.entity < item->entity) {
+                            
+                            store_scores[store_idx].valid = 0;
+                            break;
+                        }
+
+                        float discount = store_purchases[store_idx] > 0 ? 0.9 : 1.0; // 10% تخفیف
+                        if (discount == 0.9){
+                            printf("LIST get 10 percent discount. \nStore : %d\n", store_idx + 1);
+                        }else{
+                            printf("LIST didnt get 10 percent discount. \nStore : %d\n" , store_idx + 1);
+                        }
+                       
+                        store_scores[store_idx].total_score += (product.score /( product.price * discount)) * item->entity;
+                        store_scores[store_idx].total_price += (product.price * discount) * item->entity;
+
+                       
+                        if (store_scores[store_idx].total_price > threshold) {
+                            store_scores[store_idx].valid = 0;
+                        }
+                    }
+                }
+            }
+            if (!store_scores[store_idx].valid) break; 
+        }
+        //printf("STORE SCORE [%d] . VALID : %d\n", store_idx, store_scores[store_idx].valid);
+        fclose(store);
+    }
+}
+
+
+void update_store_inventory(const char *user_dir, struct Product *shopping_list, int shopping_list_count, int best_store) {
+    for (int i = 0; i < shopping_list_count; i++) {
+        struct Product *item = &shopping_list[i];
+
+        FILE *product_file = fopen(item->file_path, "r+");
+        if (!product_file) {
+            printf("this is the given path: %s\n", item->file_path);
+            perror("Failed to open product file for update");
+            continue;
+        }
+
+        struct Product product;
+
+       
+        fscanf(product_file,
+               "Name: %99[^\n]\nPrice: %f\nScore: %f\nEntity: %d\nLast Modified: %49[^\n]\: %s\n",
+               product.name, &product.price, &product.score, &product.entity, product.last_modified);
+
+ 
+        if (product.entity >= item->entity) {
+            product.entity -= item->entity;
+        } else {
+            printf("Error: Insufficient stock for product %s in file %s\n", product.name, item->file_path);
+            fclose(product_file);
+            continue;
+        }
+
+        
+        time_t now = time(NULL);
+        strftime(product.last_modified, sizeof(product.last_modified), "%Y-%m-%d %H:%M:%S", localtime(&now));
+
+        
+        fseek(product_file, 0, SEEK_SET);
+        fprintf(product_file,
+                "Name: %s\nPrice: %.2f\nScore: %.2f\nEntity: %d\nLast Modified: %s\n",
+                product.name, product.price, product.score, product.entity, product.last_modified);
+
+        fclose(product_file);
+
+        printf("Updated inventory product: %s in file: %s\n", product.name, item->file_path);
+    }
+}
+
+
+void update_store_score(const char *user_dir, struct Product *shopping_list, int shopping_list_count, int best_store, int *votes) {
+    for (int i = 0; i < shopping_list_count; i++) {
+        struct Product *item = &shopping_list[i];
+
+        
+        FILE *product_file = fopen(item->file_path, "r+");
+        if (!product_file) {
+            printf("this is the given path: %s\n", item->file_path);
+            perror("Failed to open product file for update");
+            continue;
+        }
+
+        struct Product product;
+
+        fscanf(product_file,
+               "Name: %99[^\n]\nPrice: %f\nScore: %f\nEntity: %d\nLast Modified: %49[^\n]\: %s\n",
+               product.name, &product.price, &product.score, &product.entity, product.last_modified);
+
+
+        product.score = (product.score + votes[i]) / 2.0 ; 
+
+        
+        time_t now = time(NULL);
+        strftime(product.last_modified, sizeof(product.last_modified), "%Y-%m-%d %H:%M:%S", localtime(&now));
+
+     
+        fseek(product_file, 0, SEEK_SET);
+        fprintf(product_file,
+                "Name: %s\nPrice: %.2f\nScore: %.2f\nEntity: %d\nLast Modified: %s\n",
+                product.name, product.price, product.score, product.entity, product.last_modified);
+
+        fclose(product_file);
+
+        printf("Updated score product: %s in file: %s\n", product.name, item->file_path);
+    }
+}
+
+
+int finalize_purchase(struct StoreScore *store_scores) {
+  
+    int best_store_idx = -1;
+    float best_score = -1;
+
+    
+
+    for (int i = 0; i < 3; i++) {
+        if (store_scores[i].valid && store_scores[i].total_score > best_score) {
+            best_score = store_scores[i].total_score;
+            best_store_idx = i;
+        }
+    }
+
+    if (best_store_idx == -1) {
+        printf("No valid store found for the purchase.\n");
+        return -1;
+    }
+
+    struct StoreScore *best_store = &store_scores[best_store_idx];
+    printf("Purchase completed at store: %s\n", best_store->store_name);
+    printf("Total Price: %.2f\n", best_store->total_price);
+    printf("Total Score: %.2f\n", best_store->total_score);
+    store_purchases[best_store_idx]++; 
+    return best_store_idx;
+}
+
+int read_integers_from_file_with_array(const char *filename, int *arr, int size) {
+    FILE *fp = fopen(filename, "r");
+    if (!fp) {
+        perror("fopen");
+        return -1; 
+    }
+
+    int num;
+    int idx = 0;
+    while (idx < size && fscanf(fp, "%d", &num) == 1) {
+        arr[idx++] = num;
+    }
+
+    fclose(fp);
+
+    return idx; 
+}
+
+void *give_value_to_list(void *arg) {
+    struct ValuePuttingArgs *args = (struct ValuePuttingArgs *)arg;
+
+    while (args->user_list_number-1 > user_processed_list[args->user_number]) {
+        sleep(0.2);
+    }
+
+    sem_wait(global_semaphore);
+
+    char user_dir[MAX_PATH_LENGTH];
+    snprintf(user_dir, sizeof(user_dir), "output/user%d_list%d_output", args->user_number, args->user_list_number);
+
+    struct StoreScore store_scores[3];
+    calculate_store_scores(user_dir, args->shopping_list, args->shopping_list_count, args->threshold, store_scores);
+    
+    printf("Finalizing purchase for user%d list%d\n",args->user_number , args->user_list_number);
+    int selected = finalize_purchase(store_scores);
+    if (selected != -1)
+    {
+        char store_file[MAX_PATH_LENGTH];
+        snprintf(store_file, sizeof(store_file), "%s/store%d.txt", user_dir, selected + 1);
+
+   
+        update_product_paths(user_dir, args->shopping_list, args->shopping_list_count, store_file);
+
+        update_store_inventory(user_dir, args->shopping_list, args->shopping_list_count, selected);
+    }
+    
+    user_processed_list[args->user_number]++;
+
+    sem_post(global_semaphore);
+
+
+
+    if (selected != -1)
+    {
+
+    char user_vote_file[MAX_PATH_LENGTH];
+    snprintf(user_vote_file, sizeof(user_vote_file), "./rates/user%d_list%d.txt", args->user_number, args->user_list_number);
+    printf("Waiting for user %d votes ...\n", args->user_number);
+    while (access(user_vote_file, F_OK) != 0) {
+        sleep(0.2);
+    }    
+    int array_size = args->shopping_list_count; // مثلاً ما می‌خواهیم حداکثر 100 عدد بخوانیم
+    int *votes = (int *)malloc(array_size * sizeof(int));
+    if (!votes) {
+        perror("malloc");
+        return 1;
+    }
+
+    int count = read_integers_from_file_with_array(user_vote_file, votes, array_size);
+
+
+    sem_wait(global_semaphore);
+    
+
+    update_store_score(user_dir, args->shopping_list, args->shopping_list_count, selected, votes);
+
+    sem_post(global_semaphore);
+    printf("User %d voting is finished.\n", args->user_number);
+
+    }
+
+    pthread_exit(NULL);
+}
 
 
 void read_user_shopping_list(const char *file_path, struct ShoppingList *shopping_lists, int *list_count) {
@@ -45,7 +406,7 @@ void read_user_shopping_list(const char *file_path, struct ShoppingList *shoppin
         if (strstr(line, "list")) {
             current_list++;
             shopping_lists[current_list].product_count = 0;
-            shopping_lists[current_list].threshold = INT_MAX; // Default threshold
+            shopping_lists[current_list].threshold = INT_MAX;
         } else if (strstr(line, "Treshhold")) {
             sscanf(line, "Treshhold : %d", &shopping_lists[current_list].threshold);
         } else {
@@ -184,11 +545,26 @@ void process_directory(const char *dir_path, const char *user_dir, struct Produc
                 if (pthread_create(&threads[thread_count], NULL, process_file, args) != 0) {
                     perror("Failed to create thread");
                 } else {
-                    //printf("PID : %d Create Thread with Thread TID %ld created for file %s\n", getpid(), threads[thread_count], full_path);
                     thread_count++;
                 }
             }
         }
+    }
+    if (getpid() == User_pid){
+        printf("this is parent of %d\n", User_pid);
+        sleep(2);
+        printf("this is parent of %d after sleep\n", User_pid);
+
+        pthread_t value_thread;
+        struct ValuePuttingArgs *args = malloc(sizeof(struct ValuePuttingArgs));
+        args->threshold = threshold;
+        args->user_number = user_number;
+        args->user_list_number = user_list_number;
+        args->shopping_list = shopping_list;
+        args->shopping_list_count = shopping_list_count;
+
+        pthread_create(&value_thread, NULL, give_value_to_list, args);
+        pthread_join(value_thread, NULL);
     }
 
     for (int i = 0; i < thread_count; i++) {
@@ -212,7 +588,7 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-
+    initialize_shared_semaphore(); 
     for (int i = 1; i <= user_count; i++) {
         pid_t pid = fork();
         if (pid == 0) {
@@ -225,13 +601,13 @@ int main() {
 
             for (int j = 0; j < list_count; j++) {
                 char user_dir[100];
-                snprintf(user_dir, sizeof(user_dir), "output/user%d_list%d_output", i, j + 1);
+                snprintf(user_dir, sizeof(user_dir), "output/user%d_list%d_output", i, j + 1); // مسیر جدید در پوشه outpu
                 mkdir(user_dir, 0777);
 
                 for (int k = 0; k < 3; k ++){
                     char store_file[MAX_PATH_LENGTH];
                     snprintf(store_file, sizeof(store_file), "%s/store%d.txt", user_dir, k + 1);
-                    // printf("store FILE : %s\n", store_file);
+               
                     fclose(fopen(store_file, "w"));
                 }
 
@@ -247,5 +623,6 @@ int main() {
     }
 
     pthread_mutex_destroy(&file_mutex);
+    destroy_shared_semaphore(); 
     return 0;
 }
