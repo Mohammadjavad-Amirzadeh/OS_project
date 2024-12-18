@@ -1,2 +1,4 @@
 list1:
-Item : name of product, Quantity : count of product you want
+Item : Yogurt, Quantity : 3
+Item : Chicken Sandwich, Quantity : 4
+Item : BB Cream, Quantity : 10
