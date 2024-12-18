@@ -1,0 +1,7 @@
+list1:
+Item : Mascara, Quantity : 3
+Item : Volleyball, Quantity : 2
+Treshhold : 100
+
+list2:
+Item : Monopoly, Quantity : 4
