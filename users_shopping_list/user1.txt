@@ -1,0 +1,4 @@
+list1:
+Item : Dining Table, Quantity : 2
+Item : Headphones, Quantity : 1
+
